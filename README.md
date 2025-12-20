@@ -1,6 +1,6 @@
-# MEP Filter Testing Tool
+# MEPSimFilt
 
-## 🧠 Systematic Digital Filter Evaluation for Motor Evoked Potentials
+## 🧠 A Systematic Digital Filter Evaluation tool for Motor Evoked Potentials
 
 **Version:** 1.0.0  
 **Author:** Justin W. Andrushko, PhD  
@@ -11,7 +11,7 @@
 
 ## Overview
 
-The MEP Filter Testing Tool is a specialized Python application for systematic evaluation of digital filter parameters in transcranial magnetic stimulation (TMS) research. It addresses the critical methodological gap created by substantial heterogeneity in filtering approaches across published studies (filter parameters ranging from 4-1500 Hz bandpass configurations).
+The MEPSimFilt is a specialised Python application for systematic evaluation of digital filter parameters in transcranial magnetic stimulation (TMS) research. It addresses the critical methodological gap created by substantial heterogeneity in filtering approaches across published studies (filter parameters ranging from 4-1500 Hz bandpass configurations).
 
 This tool enables researchers to:
 - Generate realistic Motor Evoked Potential (MEP) waveforms with multiple morphologies
