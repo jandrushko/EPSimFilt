@@ -212,12 +212,12 @@ If you use this tool in your research, please cite:
 ```bibtex
 @software{andrushko2025mep,
   author = {Andrushko, Justin W.},
-  title = {MEP Filter Testing Tool: Systematic Digital Filter Evaluation 
-           for Motor Evoked Potentials},
+  title = {MEPSimFilt: A Systematic Digital Filter Evaluation tool
+    for Motor Evoked Potentials},
   year = {2025},
   version = {1.0.0},
   publisher = {Northumbria University},
-  url = {https://github.com/andrushko/mep-filter-tool}
+  url = {https://github.com/jandrushko/MEPSimFilt}
 }
 ```
 
@@ -250,7 +250,7 @@ Contributions welcome! Please:
 ## Support
 
 **Email:** justin.andrushko@northumbria.ac.uk  
-**GitHub:** https://github.com/andrushko/mep-filter-tool  
+**GitHub:** https://github.com/jandrushko/MEPSimFilt
 **TMSMultiLab:** https://github.com/TMSMultiLab
 
 ---
