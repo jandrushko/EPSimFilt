@@ -5878,9 +5878,3 @@ with st.sidebar:
     
     st.divider()
     
-    st.header("Resources")
-    st.markdown("""
-    - [TMS-EMG Best Practices](https://doi.org/10.1016/j.clinph.2014.07.023)
-    - [Digital Filter Design](https://scipy.github.io/devdocs/tutorial/signal.html)
-    - [MEP Analysis Guidelines](https://doi.org/10.1016/j.brs.2018.04.018)
-    """)
