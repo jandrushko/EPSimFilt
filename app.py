@@ -3808,7 +3808,7 @@ with tab3:
             st.subheader("Analysis Options")
             
             n_iterations = st.slider("Iterations per configuration", 
-                                    min_value=1, max_value=10000, value=10, step=1)
+                                    min_value=1, max_value=5000, value=10, step=1)
             
             st.info("""
             **Note:** Each iteration uses the same signal parameters but different 
