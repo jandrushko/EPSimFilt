@@ -165,7 +165,7 @@ class MEPMetrics:
         window_signal = np.abs(signal[window_mask])
         
         # Integrate using trapezoidal rule
-        auc = np.trapz(window_signal, dx=1/self.sampling_rate)
+        auc = np.trapezoid(window_signal, dx=1/self.sampling_rate)
         
         return auc
     
