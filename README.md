@@ -46,7 +46,7 @@ This tool enables researchers to:
 - **Butterworth IIR filters:** 1st through 8th orders (effective 2nd-16th with zero-phase filtfilt)
 - **FIR filters:** Hamming, Hann, Blackman windows
 - **Notch filters:** 50/60 Hz line noise rejection
-- **Comprehensive testing:** Up to 10,000 iterations per configuration
+- **Comprehensive testing:** Up to 5,000 iterations per configuration
 - **Batch processing:** Test up to 96 configurations automatically
 
 ### Statistical Analysis
@@ -101,7 +101,7 @@ streamlit run app.py
 
 ### Dependencies
 - streamlit ≥1.28.0
-- numpy ≥1.24.0
+- numpy ≥2.0
 - scipy ≥1.11.0
 - matplotlib ≥3.7.0
 - pandas ≥2.0.0
