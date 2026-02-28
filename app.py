@@ -3263,7 +3263,8 @@ with tab2:
             filter_type = st.selectbox(
                 "Filter Type",
                 ["butterworth", "butterworth_single_pass", "fir_hamming", 
-                 "fir_hann", "fir_blackman", "moving_average", "savitzky_golay"]
+                 "fir_hann", "fir_blackman", "moving_average", "savitzky_golay",
+                 "wavelet_denoise"]
             )
             
             st.write("**Frequency Cutoffs**")
@@ -3307,6 +3308,54 @@ with tab2:
                 polyorder = st.slider("Polynomial Order", 
                                      min_value=2, max_value=5, value=3, step=1)
                 order = 4
+            elif filter_type == 'wavelet_denoise':
+                st.write("**Wavelet Denoising Parameters**")
+                st.info("""
+                Wavelet denoising works in the time-frequency domain simultaneously,
+                making it well suited to brief transient signals like evoked potentials.
+                It preserves EP shape by keeping large coefficients (signal) and 
+                removing small ones (noise).
+                """)
+                wavelet_family = st.selectbox(
+                    "Wavelet Family",
+                    ["db4", "db6", "db8", "sym4", "sym6", "sym8", "coif3"],
+                    index=1,
+                    help="db/sym wavelets suit EPs well. Higher numbers = smoother wavelet."
+                )
+                wavelet_level = st.slider(
+                    "Decomposition Level (0 = auto)",
+                    min_value=0, max_value=8, value=0, step=1,
+                    help="0 = automatic selection based on signal length. Higher = coarser decomposition."
+                )
+                wavelet_level_val = None if wavelet_level == 0 else wavelet_level
+
+                threshold_method = st.selectbox(
+                    "Threshold Method",
+                    ["universal", "bayes", "manual"],
+                    index=0,
+                    help="Universal (VisuShrink): conservative, good default. Bayes: adaptive per level, more aggressive. Manual: set your own threshold."
+                )
+                threshold_scale = st.slider(
+                    "Threshold Scale" if threshold_method != "manual" else "Manual Threshold Value",
+                    min_value=0.1, max_value=5.0, value=1.0, step=0.1,
+                    help="Multiplier on computed threshold (universal/bayes) or absolute threshold (manual). Higher = more aggressive denoising."
+                )
+                wavelet_mode = st.selectbox(
+                    "Thresholding Mode",
+                    ["soft", "hard"],
+                    index=0,
+                    help="Soft: shrinks coefficients gradually (recommended, smoother result). Hard: zeros coefficients below threshold (sharper but may ring)."
+                )
+                order = 0  # Not applicable for wavelet
+
+                # Show approximate frequency bands
+                if st.checkbox("Show decomposition frequency bands", value=False):
+                    level_for_bands = wavelet_level_val if wavelet_level_val else 5
+                    temp_filters = EPFilters(sampling_rate=data['sampling_rate'])
+                    bands = temp_filters.get_wavelet_frequency_bands(wavelet_family, level_for_bands)
+                    st.write("**Approximate frequency bands per level:**")
+                    for band_name, (f_low, f_high) in bands.items():
+                        st.caption(f"  {band_name}: {f_low}–{f_high} Hz")
             else:
                 order = 4
             
@@ -3328,6 +3377,12 @@ with tab2:
                 elif filter_type == 'savitzky_golay':
                     filter_params['window_length'] = window_length
                     filter_params['polyorder'] = polyorder
+                elif filter_type == 'wavelet_denoise':
+                    filter_params['wavelet_family'] = wavelet_family
+                    filter_params['wavelet_level'] = wavelet_level_val
+                    filter_params['threshold_method'] = threshold_method
+                    filter_params['threshold_scale'] = threshold_scale
+                    filter_params['wavelet_mode'] = wavelet_mode
                 
                 # Apply filter
                 with st.spinner("Applying filter..."):
@@ -3451,19 +3506,37 @@ with tab2:
                 
                 # Frequency response
                 st.subheader("Filter Frequency Response")
-                freqs, response = filters.get_frequency_response(result['filter_params'])
-                
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(freqs, response, 'b-', linewidth=2)
-                ax.axhline(-3, color='r', linestyle='--', alpha=0.5, label='-3 dB')
-                ax.set_xlabel('Frequency (Hz)')
-                ax.set_ylabel('Magnitude (dB)')
-                ax.set_title('Filter Frequency Response')
-                ax.grid(True, alpha=0.3)
-                ax.legend()
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close()
+
+                if result['filter_params']['filter_type'] == 'wavelet_denoise':
+                    st.info("""
+                    **Wavelet denoising does not have a fixed frequency response.**
+                    
+                    Unlike conventional filters, wavelet denoising is adaptive — it 
+                    responds differently depending on the signal content at each moment 
+                    in time. The approximate frequency bands captured at each 
+                    decomposition level are shown below instead.
+                    """)
+                    wf = result['filter_params'].get('wavelet_family', 'db6')
+                    wl = result['filter_params'].get('wavelet_level', None) or 5
+                    bands = filters.get_wavelet_frequency_bands(wf, wl)
+                    band_df = pd.DataFrame(
+                        [(k, f"{v[0]}–{v[1]} Hz") for k, v in bands.items()],
+                        columns=["Component", "Approximate Frequency Band"]
+                    )
+                    st.dataframe(band_df, hide_index=True, use_container_width=True)
+                else:
+                    freqs, response = filters.get_frequency_response(result['filter_params'])
+                    fig, ax = plt.subplots(figsize=(10, 4))
+                    ax.plot(freqs, response, 'b-', linewidth=2)
+                    ax.axhline(-3, color='r', linestyle='--', alpha=0.5, label='-3 dB')
+                    ax.set_xlabel('Frequency (Hz)')
+                    ax.set_ylabel('Magnitude (dB)')
+                    ax.set_title('Filter Frequency Response')
+                    ax.grid(True, alpha=0.3)
+                    ax.legend()
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    plt.close()
                 
                 # Time-Frequency Analysis
                 st.subheader("🌊 Time-Frequency Analysis (Morlet Wavelet)")
@@ -3545,7 +3618,7 @@ with tab3:
             
             test_filters = st.multiselect(
                 "Select Filter Types",
-                ["butterworth", "fir_hamming", "fir_hann", "fir_blackman"],
+                ["butterworth", "fir_hamming", "fir_hann", "fir_blackman", "wavelet_denoise"],
                 default=["butterworth"]
             )
             
@@ -3579,6 +3652,38 @@ with tab3:
                    f"cutoff frequencies must be below {st.session_state.generated_signals['sampling_rate']/2:.0f} Hz (Nyquist limit).")
             
             include_notch_batch = st.checkbox("Test with/without notch filter", value=False)
+
+            # Wavelet options (shown only if wavelet selected)
+            if 'wavelet_denoise' in test_filters:
+                with st.expander("⚙️ Wavelet Denoising Options", expanded=True):
+                    st.write("**These settings apply to all wavelet configurations tested:**")
+                    col_wv1, col_wv2 = st.columns(2)
+                    with col_wv1:
+                        batch_wavelet_families = st.multiselect(
+                            "Wavelet Families to Test",
+                            ["db4", "db6", "db8", "sym4", "sym6", "sym8", "coif3"],
+                            default=["db6", "sym6"],
+                            help="Each selected family will be tested as a separate configuration."
+                        )
+                        batch_threshold_methods = st.multiselect(
+                            "Threshold Methods to Test",
+                            ["universal", "bayes"],
+                            default=["universal"],
+                            help="Each selected method will be tested as a separate configuration."
+                        )
+                    with col_wv2:
+                        batch_threshold_scale = st.slider(
+                            "Threshold Scale", 0.5, 3.0, 1.0, 0.25,
+                            help="Applied to all wavelet configurations."
+                        )
+                        batch_wavelet_mode = st.selectbox(
+                            "Thresholding Mode", ["soft", "hard"], index=0
+                        )
+            else:
+                batch_wavelet_families = ["db6"]
+                batch_threshold_methods = ["universal"]
+                batch_threshold_scale = 1.0
+                batch_wavelet_mode = "soft"
             
         with col2:
             st.subheader("Analysis Options")
@@ -3645,6 +3750,24 @@ with tab3:
                                     'notch_enabled': notch,
                                     'notch_freq': data['parameters'].get('line_freq', 50)
                                 })
+            
+            # Add wavelet configurations (independent of hp/lp cutoffs)
+            if 'wavelet_denoise' in test_filters:
+                for wf in batch_wavelet_families:
+                    for tm in batch_threshold_methods:
+                        configurations.append({
+                            'filter_type': 'wavelet_denoise',
+                            'lowcut': None,
+                            'highcut': None,
+                            'order': 0,
+                            'notch_enabled': False,
+                            'notch_freq': data['parameters'].get('line_freq', 50),
+                            'wavelet_family': wf,
+                            'wavelet_level': None,
+                            'threshold_method': tm,
+                            'threshold_scale': batch_threshold_scale,
+                            'wavelet_mode': batch_wavelet_mode
+                        })
             
             # Run batch analysis
             results_list = []
@@ -3783,10 +3906,20 @@ with tab3:
             df = st.session_state.batch_results
             
             # Create configuration label
-            df['config_label'] = (df['filter_type'].str[:7] + '_' + 
-                                 df['lowcut'].astype(str) + '-' + 
-                                 df['highcut'].astype(str) + 'Hz_' +
-                                 'O' + df['order'].astype(str))
+            def make_config_label(row):
+                if row['filter_type'] == 'wavelet_denoise':
+                    wf = row.get('wavelet_family', 'db6')
+                    tm = row.get('threshold_method', 'universal')
+                    ts = row.get('threshold_scale', 1.0)
+                    return f"wavelet_{wf}_{tm}_s{ts}"
+                else:
+                    label = (row['filter_type'][:7] + '_' +
+                             str(row['lowcut']) + '-' +
+                             str(row['highcut']) + 'Hz_O' +
+                             str(row['order']))
+                    return label
+
+            df['config_label'] = df.apply(make_config_label, axis=1)
             if include_notch_batch:
                 df['config_label'] += df['notch_enabled'].apply(lambda x: '_N' if x else '')
             
@@ -5191,13 +5324,17 @@ with tab4:
                 
                 references_used.append('fir')
             
-            # Frequency specifications
-            hp_cutoffs = sorted(df['lowcut'].unique())
-            lp_cutoffs = sorted(df['highcut'].unique())
-            
+            # Frequency specifications (exclude wavelet configs which have no cutoffs)
+            hp_cutoffs = sorted([x for x in df['lowcut'].unique()
+                                 if x is not None and not (isinstance(x, float) and np.isnan(x))])
+            lp_cutoffs = sorted([x for x in df['highcut'].unique()
+                                 if x is not None and not (isinstance(x, float) and np.isnan(x))])
+
             methods_parts.append(f"were evaluated systematically across {n_configs} configurations ")
-            methods_parts.append(f"with highpass cutoffs of {', '.join([f'{int(x)}' for x in hp_cutoffs])} Hz ")
-            methods_parts.append(f"and lowpass cutoffs of {', '.join([f'{int(x)}' for x in lp_cutoffs])} Hz. ")
+            if hp_cutoffs:
+                methods_parts.append(f"with highpass cutoffs of {', '.join([f'{int(x)}' for x in hp_cutoffs])} Hz ")
+            if lp_cutoffs:
+                methods_parts.append(f"and lowpass cutoffs of {', '.join([f'{int(x)}' for x in lp_cutoffs])} Hz. ")
             
             if detail_level != "Standard (Journal Article)":
                 nyquist = data['sampling_rate'] / 2.0

@@ -7,6 +7,12 @@ import numpy as np
 from scipy import signal as scipy_signal
 from typing import Tuple, Optional, Dict
 
+try:
+    import pywt
+    PYWT_AVAILABLE = True
+except ImportError:
+    PYWT_AVAILABLE = False
+
 
 class EPFilters:
     """Collection of filters for EP signal processing."""
@@ -262,6 +268,112 @@ class EPFilters:
         filtered = scipy_signal.savgol_filter(signal, window_length, polyorder)
         return filtered
     
+    def wavelet_denoise(self,
+                       signal: np.ndarray,
+                       wavelet: str = 'db6',
+                       level: Optional[int] = None,
+                       threshold_method: str = 'universal',
+                       threshold_scale: float = 1.0,
+                       mode: str = 'soft') -> np.ndarray:
+        """
+        Denoise signal using Discrete Wavelet Transform (DWT) thresholding.
+
+        Unlike frequency-domain filters, wavelet denoising operates in
+        time-frequency space simultaneously, making it well suited to
+        brief transient signals such as evoked potentials.
+
+        Parameters:
+        -----------
+        signal : np.ndarray
+            Input signal
+        wavelet : str
+            Wavelet family. Recommended for biomedical signals:
+            'db4', 'db6', 'db8'  - Daubechies (asymmetric, compact)
+            'sym4', 'sym6', 'sym8' - Symlets (near-symmetric, good shape preservation)
+            'coif3'               - Coiflets (symmetric, good for smooth signals)
+        level : int or None
+            Decomposition level. If None, automatically chosen based on
+            signal length (floor(log2(N)) - 2, capped at 6).
+        threshold_method : str
+            How to calculate the denoising threshold:
+            'universal' - VisuShrink: sigma * sqrt(2 * log(N))
+                          Conservative — good default for EPs.
+            'bayes'     - BayesShrink: per-level adaptive threshold.
+                          More aggressive — better for very noisy signals.
+            'manual'    - threshold_scale used directly as threshold value.
+        threshold_scale : float
+            Multiplier on the computed threshold (universal/bayes) or
+            the absolute threshold value (manual). Default 1.0.
+        mode : str
+            Thresholding mode:
+            'soft' - shrinks coefficients toward zero (smoother result,
+                     recommended for EP shape preservation)
+            'hard' - zeroes coefficients below threshold (sharper edges,
+                     may introduce ringing)
+
+        Returns:
+        --------
+        filtered : np.ndarray
+            Denoised signal, same length as input.
+        """
+        if not PYWT_AVAILABLE:
+            raise ImportError(
+                "PyWavelets (pywt) is required for wavelet denoising. "
+                "Install it with: pip install PyWavelets"
+            )
+
+        # Auto-select decomposition level
+        if level is None:
+            max_level = pywt.dwt_max_level(len(signal), wavelet)
+            level = min(max(3, max_level - 2), 6)
+
+        # Decompose signal into wavelet coefficients
+        coeffs = pywt.wavedec(signal, wavelet, level=level)
+
+        # Estimate noise standard deviation from finest detail level
+        # using the robust MAD estimator (median absolute deviation)
+        # This is standard practice (Donoho & Johnstone, 1994)
+        detail_coeffs = coeffs[-1]
+        sigma = np.median(np.abs(detail_coeffs)) / 0.6745  # MAD estimator
+        N = len(signal)
+
+        # Threshold and denoise each detail level
+        denoised_coeffs = [coeffs[0]]  # Keep approximation coefficients unchanged
+
+        for i, detail in enumerate(coeffs[1:], 1):
+            n_level = len(detail)
+
+            if threshold_method == 'universal':
+                # VisuShrink universal threshold
+                threshold = threshold_scale * sigma * np.sqrt(2 * np.log(N))
+
+            elif threshold_method == 'bayes':
+                # BayesShrink: per-level adaptive threshold
+                # Estimates signal variance at each level
+                signal_var = max(np.var(detail) - sigma**2, 1e-10)
+                threshold = threshold_scale * (sigma**2 / np.sqrt(signal_var))
+
+            elif threshold_method == 'manual':
+                threshold = threshold_scale
+
+            else:
+                threshold = threshold_scale * sigma * np.sqrt(2 * np.log(N))
+
+            # Apply thresholding
+            denoised_detail = pywt.threshold(detail, threshold, mode=mode)
+            denoised_coeffs.append(denoised_detail)
+
+        # Reconstruct signal from thresholded coefficients
+        filtered = pywt.waverec(denoised_coeffs, wavelet)
+
+        # Trim or pad to original length (waverec can add 1 extra sample)
+        if len(filtered) > len(signal):
+            filtered = filtered[:len(signal)]
+        elif len(filtered) < len(signal):
+            filtered = np.pad(filtered, (0, len(signal) - len(filtered)), mode='edge')
+
+        return filtered
+
     def apply_filter_cascade(self,
                             signal: np.ndarray,
                             filter_params: Dict) -> np.ndarray:
@@ -319,6 +431,15 @@ class EPFilters:
                 window_length = filter_params.get('window_length', 11)
                 polyorder = filter_params.get('polyorder', 3)
                 filtered = self.savitzky_golay_filter(filtered, window_length, polyorder)
+            elif filter_type == 'wavelet_denoise':
+                filtered = self.wavelet_denoise(
+                    filtered,
+                    wavelet=filter_params.get('wavelet_family', 'db6'),
+                    level=filter_params.get('wavelet_level', None),
+                    threshold_method=filter_params.get('threshold_method', 'universal'),
+                    threshold_scale=filter_params.get('threshold_scale', 1.0),
+                    mode=filter_params.get('wavelet_mode', 'soft')
+                )
         
         except ValueError as e:
             # Provide helpful error message
@@ -412,5 +533,33 @@ class EPFilters:
         
         # Convert to dB
         response_db = 20 * np.log10(np.abs(response) + 1e-10)
-        
+
         return freqs, response_db
+
+    def get_wavelet_frequency_bands(self,
+                                    wavelet: str = 'db6',
+                                    level: int = 5) -> dict:
+        """
+        Return approximate frequency bands for each wavelet decomposition level.
+        Useful for understanding which frequencies each level captures.
+
+        Parameters:
+        -----------
+        wavelet : str
+            Wavelet family name
+        level : int
+            Number of decomposition levels
+
+        Returns:
+        --------
+        dict : level -> (f_low, f_high) in Hz
+        """
+        nyquist = self.sampling_rate / 2.0
+        bands = {}
+        f_high = nyquist
+        for lev in range(1, level + 1):
+            f_low = f_high / 2.0
+            bands[f'Detail level {lev}'] = (round(f_low, 1), round(f_high, 1))
+            f_high = f_low
+        bands[f'Approx level {level}'] = (0.0, round(f_high, 1))
+        return bands
